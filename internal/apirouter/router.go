@@ -1,5 +1,4 @@
-// internal/api/router.go
-package api
+package apirouter
 
 import (
 	"github.com/arkishshah/go-infra-provisioner/internal/api/handlers"

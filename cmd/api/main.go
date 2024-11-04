@@ -8,7 +8,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arkishshah/go-infra-provisioner/internal/api"
+	"github.com/arkishshah/go-infra-provisioner/internal/apirouter" // This should match your router file location
 	"github.com/arkishshah/go-infra-provisioner/internal/config"
 	"github.com/arkishshah/go-infra-provisioner/pkg/awsclient"
 	"github.com/arkishshah/go-infra-provisioner/pkg/logger"
@@ -31,7 +31,7 @@ func main() {
 	}
 
 	// Initialize router
-	router := api.NewRouter(cfg, awsClient, logger)
+	router := apirouter.NewRouter(cfg, awsClient, logger)
 
 	// Configure server
 	srv := &http.Server{
