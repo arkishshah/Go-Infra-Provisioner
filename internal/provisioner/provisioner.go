@@ -3,13 +3,11 @@ package provisioner
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/arkishshah/go-infra-provisioner/internal/config"
 	"github.com/arkishshah/go-infra-provisioner/internal/models"
 	"github.com/arkishshah/go-infra-provisioner/pkg/awsclient"
 	"github.com/arkishshah/go-infra-provisioner/pkg/logger"
-	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/iam"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -30,95 +28,80 @@ func NewResourceProvisioner(cfg *config.Config, awsClient *awsclient.AWSClient, 
 	}
 }
 
-// ProvisionClientResources handles the complete provisioning process for a client
 func (p *ResourceProvisioner) ProvisionClientResources(ctx context.Context, req *models.ProvisionRequest) (*models.ProvisionResponse, error) {
-	p.logger.Info("Starting resource provisioning for client:", req.ClientID)
+	p.logger.Info(fmt.Sprintf("Starting resource provisioning for client: %s", req.ClientID))
 
 	// Generate resource names
 	bucketName := fmt.Sprintf("%s-%s-bucket", p.config.Environment, req.ClientID)
 	roleName := fmt.Sprintf("%s-%s-role", p.config.Environment, req.ClientID)
 
+	p.logger.Info(fmt.Sprintf("Generated names - Bucket: %s, Role: %s", bucketName, roleName))
+
 	// Create S3 bucket
+	p.logger.Info("Creating S3 bucket...")
 	if err := p.createS3Bucket(ctx, bucketName); err != nil {
+		p.logger.Error(fmt.Sprintf("Failed to create S3 bucket: %v", err))
 		return nil, fmt.Errorf("failed to create S3 bucket: %w", err)
 	}
 
-	// Wait for bucket to be available
+	// Wait for bucket availability
+	p.logger.Info("Waiting for bucket availability...")
 	if err := p.waitForBucketAvailability(ctx, bucketName); err != nil {
-		p.logger.Error("Bucket availability check failed, cleaning up:", err)
+		p.logger.Error(fmt.Sprintf("Bucket availability check failed: %v", err))
 		if cleanupErr := p.deleteS3Bucket(ctx, bucketName); cleanupErr != nil {
-			return nil, fmt.Errorf("bucket creation failed and cleanup failed: %v, cleanup error: %v", err, cleanupErr)
+			p.logger.Error(fmt.Sprintf("Cleanup after failure also failed: %v", cleanupErr))
 		}
 		return nil, err
 	}
 
 	// Create IAM role
+	p.logger.Info("Creating IAM role...")
 	roleARN, err := p.createIAMRole(ctx, roleName, bucketName)
 	if err != nil {
-		p.logger.Error("IAM role creation failed, cleaning up bucket:", err)
+		p.logger.Error(fmt.Sprintf("Failed to create IAM role: %v", err))
 		if cleanupErr := p.deleteS3Bucket(ctx, bucketName); cleanupErr != nil {
-			return nil, fmt.Errorf("role creation failed and cleanup failed: %v, cleanup error: %v", err, cleanupErr)
+			p.logger.Error(fmt.Sprintf("Cleanup after role creation failure failed: %v", cleanupErr))
 		}
 		return nil, fmt.Errorf("failed to create IAM role: %w", err)
 	}
 
 	// Apply bucket policy
+	p.logger.Info("Applying bucket policy...")
 	if err := p.applyBucketPolicy(ctx, bucketName, roleARN); err != nil {
-		p.logger.Error("Bucket policy application failed, cleaning up resources:", err)
+		p.logger.Error(fmt.Sprintf("Failed to apply bucket policy: %v", err))
 		if cleanupErr := p.cleanupResources(ctx, bucketName, roleName); cleanupErr != nil {
-			return nil, fmt.Errorf("policy application failed and cleanup failed: %v, cleanup error: %v", err, cleanupErr)
+			p.logger.Error(fmt.Sprintf("Cleanup after policy application failure failed: %v", cleanupErr))
 		}
 		return nil, fmt.Errorf("failed to apply bucket policy: %w", err)
 	}
 
-	p.logger.Info("Successfully provisioned resources for client:", req.ClientID)
+	p.logger.Info(fmt.Sprintf("Successfully provisioned resources for client: %s", req.ClientID))
 
-	return &models.ProvisionResponse{
+	response := &models.ProvisionResponse{
 		Status:     "success",
 		BucketName: bucketName,
 		RoleARN:    roleARN,
-	}, nil
-}
-
-// waitForBucketAvailability waits for the bucket to be available
-
-func (p *ResourceProvisioner) waitForBucketAvailability(ctx context.Context, bucketName string) error {
-	maxRetries := 10
-	retryDelay := 2 * time.Second
-
-	for i := 0; i < maxRetries; i++ {
-		_, err := p.s3Client.HeadBucket(ctx, &s3.HeadBucketInput{
-			Bucket: aws.String(bucketName),
-		})
-		if err == nil {
-			return nil
-		}
-
-		p.logger.Info("Waiting for bucket to be available, attempt:", i+1)
-		time.Sleep(retryDelay)
 	}
 
-	return fmt.Errorf("bucket did not become available within the expected time")
+	p.logger.Info(fmt.Sprintf("Returning response: %+v", response))
+	return response, nil
 }
 
-// cleanupResources handles cleanup of all provisioned resources
 func (p *ResourceProvisioner) cleanupResources(ctx context.Context, bucketName, roleName string) error {
-	var errors []string
+	var errors []error
 
-	// Delete bucket first
+	// Delete bucket
 	if err := p.deleteS3Bucket(ctx, bucketName); err != nil {
-		errors = append(errors, fmt.Sprintf("failed to delete bucket: %v", err))
+		errors = append(errors, fmt.Errorf("failed to delete bucket: %w", err))
 	}
 
-	// Delete role policy
-	if err := p.cleanupIAMRole(ctx, roleName); err != nil {
-		errors = append(errors, fmt.Sprintf("failed to cleanup IAM role: %v", err))
+	// Delete role policy and role
+	if err := p.deleteIAMRole(ctx, roleName); err != nil {
+		errors = append(errors, fmt.Errorf("failed to delete role resources: %w", err))
 	}
 
 	if len(errors) > 0 {
 		return fmt.Errorf("cleanup errors: %v", errors)
 	}
-
-	p.logger.Info("Successfully cleaned up all resources")
 	return nil
 }

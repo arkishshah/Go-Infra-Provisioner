@@ -1,8 +1,10 @@
 package logger
 
 import (
+	"fmt"
 	"log"
 	"os"
+	"time"
 )
 
 type Logger struct {
@@ -11,20 +13,26 @@ type Logger struct {
 }
 
 func NewLogger() *Logger {
+	flags := log.Ldate | log.Ltime | log.Lshortfile
+
 	return &Logger{
-		infoLog:  log.New(os.Stdout, "INFO: ", log.Ldate|log.Ltime|log.Lshortfile),
-		errorLog: log.New(os.Stderr, "ERROR: ", log.Ldate|log.Ltime|log.Lshortfile),
+		infoLog:  log.New(os.Stdout, "INFO: ", flags),
+		errorLog: log.New(os.Stderr, "ERROR: ", flags),
 	}
 }
 
 func (l *Logger) Info(v ...interface{}) {
-	l.infoLog.Println(v...)
+	msg := fmt.Sprint(v...)
+	l.infoLog.Output(2, fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), msg))
 }
 
 func (l *Logger) Error(v ...interface{}) {
-	l.errorLog.Println(v...)
+	msg := fmt.Sprint(v...)
+	l.errorLog.Output(2, fmt.Sprintf("[%s] %s", time.Now().Format(time.RFC3339), msg))
 }
 
 func (l *Logger) Fatal(v ...interface{}) {
-	l.errorLog.Fatal(v...)
+	msg := fmt.Sprint(v...)
+	l.errorLog.Output(2, fmt.Sprintf("[%s] FATAL: %s", time.Now().Format(time.RFC3339), msg))
+	os.Exit(1)
 }

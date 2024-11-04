@@ -7,6 +7,17 @@ import (
 	"github.com/joho/godotenv"
 )
 
+// Add valid regions
+var validRegions = map[string]bool{
+	"us-east-1":      true,
+	"us-east-2":      true,
+	"us-west-1":      true,
+	"us-west-2":      true,
+	"eu-west-1":      true,
+	"ap-southeast-1": true,
+	// Add other regions as needed
+}
+
 type Config struct {
 	AWSRegion    string
 	AWSAccountID string
@@ -15,21 +26,23 @@ type Config struct {
 }
 
 func Load() (*Config, error) {
-	env := os.Getenv("APP_ENV")
-	if env == "" {
-		env = "dev"
+	// Load .env file
+	if err := godotenv.Load(); err != nil {
+		// Try loading from configs/dev/app.env if .env doesn't exist
+		if err := godotenv.Load("configs/dev/app.env"); err != nil {
+			return nil, fmt.Errorf("error loading environment files: %w", err)
+		}
 	}
 
-	// Load environment-specific .env file
-	envFile := fmt.Sprintf("configs/%s/app.env", env)
-	if err := godotenv.Load(envFile); err != nil {
-		return nil, fmt.Errorf("error loading %s: %w", envFile, err)
+	region := getEnvOrDefault("AWS_REGION", "us-east-1")
+	if !validRegions[region] {
+		return nil, fmt.Errorf("invalid AWS region: %s", region)
 	}
 
 	config := &Config{
-		AWSRegion:    getEnvOrDefault("AWS_REGION", "us-east-1"),
+		AWSRegion:    region,
 		AWSAccountID: os.Getenv("AWS_ACCOUNT_ID"),
-		Environment:  env,
+		Environment:  getEnvOrDefault("ENVIRONMENT", "dev"),
 		LogLevel:     getEnvOrDefault("LOG_LEVEL", "info"),
 	}
 
