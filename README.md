@@ -90,7 +90,7 @@ Before you begin, ensure you have the following installed:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/ashah/go-infra-provisioner.git
+git clone https://github.com/arkishshah/go-infra-provisioner.git
 cd go-infra-provisioner
 ```
 
@@ -150,7 +150,7 @@ terraform apply
 6. After successful apply, you'll see outputs like:
 ```bash
 Outputs:
-service_role_arn = "arn:aws:iam::your_account_id:role/infra-provisioner-service-role"
+service_role_arn = "arn:aws:iam::your_account_id:role/go-infra-provisioner-service-role"
 kms_key_id = "12345678-abcd-efgh-ijkl-123456789012"
 `````
 
