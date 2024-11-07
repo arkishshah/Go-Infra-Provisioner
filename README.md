@@ -26,7 +26,8 @@ Before you begin, ensure you have the following installed:
    - Go to AWS Console → IAM → Users → Add User
    - Enable programmatic access
    - Attach the following permissions policy:
-   ```json
+
+```json
  {
     "Version": "2012-10-17",
     "Statement": [
