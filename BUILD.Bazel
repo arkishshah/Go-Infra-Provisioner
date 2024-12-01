@@ -1,0 +1,21 @@
+load("@bazel_gazelle//:def.bzl", "gazelle")
+
+# Configure gazelle to understand Go and our project
+gazelle(
+    name = "gazelle",
+    command = "fix",
+    prefix = "github.com/arkishshah/go-infra-provisioner",
+    extra_args = [
+        "-build_file_name=BUILD.bazel",
+    ],
+)
+
+# Add a filegroup for all source files
+filegroup(
+    name = "all_files",
+    srcs = glob(
+        ["**/*"],
+        exclude = ["bazel-*/**"],
+    ),
+    visibility = ["//visibility:public"],
+)
