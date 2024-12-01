@@ -1,0 +1,11 @@
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
+
+go_library(
+    name = "models",
+    srcs = [
+        "client.go",
+        "errors.go",
+    ],
+    importpath = "github.com/arkishshah/go-infra-provisioner/internal/models",
+    visibility = ["//:__subpackages__"],
+)
