@@ -13,6 +13,7 @@ module "base" {
   aws_region   = var.aws_region
   environment  = var.environment
   project_name = var.project_name
+  aws_account_id = var.aws_account_id
 }
 
 output "service_role_arn" {

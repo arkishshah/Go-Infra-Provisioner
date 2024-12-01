@@ -12,3 +12,10 @@ variable "project_name" {
   description = "go-infra-provisioner"
   type        = string
 }
+
+
+variable "aws_account_id" {
+  description = "aws-aws_account_id"
+  type        = string
+}
+
