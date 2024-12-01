@@ -21,24 +21,21 @@ RUN curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel
 # Set working directory
 WORKDIR /workspace
 
-# Copy Bazel configuration files
-COPY .bazelrc WORKSPACE BUILD.bazel ./
-
-# Copy Go module files
+# Copy Go module files first
 COPY go.mod go.sum ./
 
 # Copy source code
 COPY cmd/ cmd/
 COPY internal/ internal/
 COPY pkg/ pkg/
-COPY policies/ policies/
 COPY terraform/ terraform/
+COPY configs/ configs/
 
-# Build the application using Bazel
-RUN bazel build //cmd/api:api
+# Build the Go application directly (without Bazel for now)
+RUN go build -o main cmd/api/main.go
 
 # Expose port
 EXPOSE 8080
 
 # Run the application
-CMD ["bazel", "run", "//cmd/api:api"]
+CMD ["./main"]
