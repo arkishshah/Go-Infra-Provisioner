@@ -6,3 +6,5 @@ environment = "dev"
 
 # Project name (used for resource naming)
 project_name = "go-infra-provisioner"
+
+aws_account_id = "211756558615"

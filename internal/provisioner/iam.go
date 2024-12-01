@@ -10,50 +10,61 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/iam/types"
 )
 
-func (p *ResourceProvisioner) createIAMRole(ctx context.Context, roleName, bucketName string) (string, error) {
+func (p *ResourceProvisioner) createIAMRole(ctx context.Context, roleName, bucketName, logGroupName, lambdaName string) (string, error) {
 	p.logger.Info(fmt.Sprintf("Creating IAM role: %s", roleName))
 
-	// Define the trust policy to allow EC2 instances to assume the role
+	// Updated trust relationship to properly allow Lambda
 	assumeRolePolicy := `{
         "Version": "2012-10-17",
         "Statement": [
             {
                 "Effect": "Allow",
                 "Principal": {
-                    "Service": "ec2.amazonaws.com"
+                    "Service": "lambda.amazonaws.com"
                 },
                 "Action": "sts:AssumeRole"
             }
         ]
     }`
 
-	// Create the IAM role with the trust policy
+	// Create the role
 	roleResult, err := p.iamClient.CreateRole(ctx, &iam.CreateRoleInput{
 		RoleName:                 aws.String(roleName),
 		AssumeRolePolicyDocument: aws.String(assumeRolePolicy),
-		Description:              aws.String(fmt.Sprintf("Role for client bucket access: %s", bucketName)),
+		Description:              aws.String(fmt.Sprintf("Role for client: %s", bucketName)),
 		Tags: []types.Tag{
-			{
-				Key:   aws.String("Environment"),
-				Value: aws.String(p.config.Environment),
-			},
-			{
-				Key:   aws.String("ManagedBy"),
-				Value: aws.String("Provisioner"),
-			},
+			{Key: aws.String("Environment"), Value: aws.String(p.config.Environment)},
+			{Key: aws.String("ManagedBy"), Value: aws.String("Provisioner")},
 		},
 	})
 	if err != nil {
 		return "", fmt.Errorf("failed to create role: %w", err)
 	}
 
-	// Use an explicit retry mechanism to wait for the IAM role to be fully propagated
-	if err := p.waitForRolePropagation(ctx, roleName); err != nil {
-		return "", fmt.Errorf("IAM role propagation failed: %w", err)
+	// Add small delay to allow role to propagate
+	time.Sleep(10 * time.Second)
+
+	// Attach the existing policy
+	policyArn := fmt.Sprintf("arn:aws:iam::%s:policy/go-infra-policy", p.config.AWSAccountID)
+	_, err = p.iamClient.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
+		RoleName:  aws.String(roleName),
+		PolicyArn: aws.String(policyArn),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to attach main policy: %w", err)
 	}
 
-	// Attach an inline policy for the IAM role to access the S3 bucket
-	rolePolicy := fmt.Sprintf(`{
+	// Also attach AWS Lambda basic execution role
+	_, err = p.iamClient.AttachRolePolicy(ctx, &iam.AttachRolePolicyInput{
+		RoleName:  aws.String(roleName),
+		PolicyArn: aws.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to attach Lambda execution policy: %w", err)
+	}
+
+	// Add client-specific inline policy
+	inlinePolicy := fmt.Sprintf(`{
         "Version": "2012-10-17",
         "Statement": [
             {
@@ -68,44 +79,59 @@ func (p *ResourceProvisioner) createIAMRole(ctx context.Context, roleName, bucke
                     "arn:aws:s3:::%s",
                     "arn:aws:s3:::%s/*"
                 ]
+            },
+            {
+                "Effect": "Allow",
+                "Action": [
+                    "logs:CreateLogStream",
+                    "logs:PutLogEvents",
+                    "logs:GetLogEvents",
+                    "logs:FilterLogEvents"
+                ],
+                "Resource": [
+                    "arn:aws:logs:%s:%s:log-group:%s:*"
+                ]
             }
         ]
-    }`, bucketName, bucketName)
+    }`, bucketName, bucketName, p.config.AWSRegion, p.config.AWSAccountID, logGroupName)
 
 	_, err = p.iamClient.PutRolePolicy(ctx, &iam.PutRolePolicyInput{
 		RoleName:       aws.String(roleName),
 		PolicyName:     aws.String(fmt.Sprintf("%s-policy", roleName)),
-		PolicyDocument: aws.String(rolePolicy),
+		PolicyDocument: aws.String(inlinePolicy),
 	})
 	if err != nil {
-		return "", fmt.Errorf("failed to attach inline policy to role: %w", err)
+		return "", fmt.Errorf("failed to attach inline policy: %w", err)
 	}
 
 	return *roleResult.Role.Arn, nil
 }
 
-// Enhanced role propagation check with retries
-func (p *ResourceProvisioner) waitForRolePropagation(ctx context.Context, roleName string) error {
-	const maxRetries = 10
-	const retryInterval = 5 * time.Second
+// Update cleanup to detach both policies
+func (p *ResourceProvisioner) cleanupIAMRole(ctx context.Context, roleName string) error {
+	p.logger.Info(fmt.Sprintf("Cleaning up IAM role: %s", roleName))
 
-	for i := 1; i <= maxRetries; i++ {
-		_, err := p.iamClient.GetRole(ctx, &iam.GetRoleInput{RoleName: aws.String(roleName)})
-		if err == nil {
-			p.logger.Info("IAM role is now available.")
-			return nil // Role is available
-		}
-
-		p.logger.Info(fmt.Sprintf("Waiting for IAM role propagation (attempt %d/%d)...", i, maxRetries))
-		time.Sleep(retryInterval)
+	// Detach the main policy
+	policyArn := fmt.Sprintf("arn:aws:iam::%s:policy/go-infra-policy", p.config.AWSAccountID)
+	_, err := p.iamClient.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
+		RoleName:  aws.String(roleName),
+		PolicyArn: aws.String(policyArn),
+	})
+	if err != nil {
+		p.logger.Error(fmt.Sprintf("Failed to detach main policy: %v", err))
 	}
 
-	return fmt.Errorf("IAM role propagation timed out after %d retries", maxRetries)
-}
+	// Detach Lambda execution policy
+	_, err = p.iamClient.DetachRolePolicy(ctx, &iam.DetachRolePolicyInput{
+		RoleName:  aws.String(roleName),
+		PolicyArn: aws.String("arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"),
+	})
+	if err != nil {
+		p.logger.Error(fmt.Sprintf("Failed to detach Lambda execution policy: %v", err))
+	}
 
-func (p *ResourceProvisioner) deleteIAMRole(ctx context.Context, roleName string) error {
-	// Delete role policy
-	_, err := p.iamClient.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
+	// Delete the inline policy
+	_, err = p.iamClient.DeleteRolePolicy(ctx, &iam.DeleteRolePolicyInput{
 		RoleName:   aws.String(roleName),
 		PolicyName: aws.String(fmt.Sprintf("%s-policy", roleName)),
 	})
@@ -113,7 +139,7 @@ func (p *ResourceProvisioner) deleteIAMRole(ctx context.Context, roleName string
 		return fmt.Errorf("failed to delete role policy: %w", err)
 	}
 
-	// Delete role
+	// Delete the role
 	_, err = p.iamClient.DeleteRole(ctx, &iam.DeleteRoleInput{
 		RoleName: aws.String(roleName),
 	})
@@ -121,5 +147,6 @@ func (p *ResourceProvisioner) deleteIAMRole(ctx context.Context, roleName string
 		return fmt.Errorf("failed to delete role: %w", err)
 	}
 
+	p.logger.Info(fmt.Sprintf("Successfully cleaned up IAM role: %s", roleName))
 	return nil
 }
