@@ -1,9 +1,21 @@
-# Use a base image with Bazel pre-installed
-FROM l.gcr.io/google/bazel:6.4.0
+# Use Ubuntu as base image
+FROM ubuntu:22.04
 
-# Install Go
+# Install required packages including Bazel
 RUN apt-get update && apt-get install -y \
+    curl \
+    wget \
+    git \
     golang-go \
+    python3 \
+    g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Bazel
+RUN curl -fsSL https://bazel.build/bazel-release.pub.gpg | gpg --dearmor > bazel.gpg \
+    && mv bazel.gpg /etc/apt/trusted.gpg.d/ \
+    && echo "deb [arch=amd64] https://storage.googleapis.com/bazel-apt stable jdk1.8" | tee /etc/apt/sources.list.d/bazel.list \
+    && apt-get update && apt-get install -y bazel \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory
